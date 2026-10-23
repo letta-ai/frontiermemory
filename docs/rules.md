@@ -106,8 +106,9 @@ Review has two parts, as in Terminal-Bench 2.1:
    answers that came from outside the memory. A broken rule makes the
    submission invalid.
 
-Native Claude Managed Agents jobs retain `meta.json`, `dream.log`,
-`memory-report.json`, and the exported `memory/`. They can seed task agents
+Memory generators that run outside Harbor, such as Claude Managed Agents, are
+registered in `src/frontier_memory/hosted.py`. Their jobs retain `meta.json`,
+their log, `memory-report.json`, and the exported `memory/`. They can seed task agents
 with `--memory jobs/<memory-job>`, but their API receipts are not a full agent
 trace or evidence of Harbor-enforced
 network restrictions. `bundle` includes the native evidence and flags this

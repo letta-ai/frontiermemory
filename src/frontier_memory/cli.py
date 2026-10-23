@@ -19,7 +19,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from frontier_memory import claude_dream
+from frontier_memory import claude_dream, hosted
 from frontier_memory.agents import DEFAULT_CLI_VERSIONS
 from frontier_memory.bundle import build_bundle, dream_trial_dir
 from frontier_memory.corpus import RELEASE_REPO, corpus_files, fetch_corpus, verify_corpus
@@ -79,13 +79,14 @@ def run_harbor(command: list[str], dry_run: bool) -> int:
 
 
 def resolve_memory(path: Path) -> Path:
-    """Accept memory itself, a successful native CMA job, or a Harbor memory job."""
+    """Accept memory itself, a successful hosted generator job, or a Harbor memory job."""
     if (path / "MEMORY.md").exists():
         return path.resolve()
-    native = claude_dream.native_dream_meta(path)
-    if native is not None:
-        if not native.get("ok") or not (path / "memory").is_dir():
-            raise ValueError(f"CMA dream has no successfully exported memory: {path}")
+    job = hosted.hosted_job(path)
+    if job is not None:
+        meta, generator = job
+        if not meta.get("ok") or not (path / "memory").is_dir():
+            raise ValueError(f"{generator.harness} job has no successfully exported memory: {path}")
         return (path / "memory").resolve()
     return (dream_trial_dir(path) / "artifacts" / "memory").resolve()
 
@@ -142,8 +143,9 @@ def cmd_cma_generate_memory(args: argparse.Namespace) -> int:
 
 
 def cmd_generate_memory(args: argparse.Namespace) -> int:
-    if args.agent == claude_dream.AGENT:
-        return cmd_cma_generate_memory(args)
+    generator = hosted.generators().get(args.agent)
+    if generator is not None:
+        return generator.run(args)
     task = (args.build_dir or Path("build")) / f"memory-task-{args.corpus.name}"
     digest = build_dream_task(args.corpus, task, args.corpus.name)
     hosts = api_hosts(args.model, args.allow_host)
@@ -179,6 +181,10 @@ def cmd_fetch_corpus(args: argparse.Namespace) -> int:
 
 
 def cmd_run_tasks(args: argparse.Namespace) -> int:
+    if args.task_agent not in TASK_AGENTS and ":" not in args.task_agent:
+        print(f"unknown harness {args.task_agent!r}: use one of {', '.join(sorted(TASK_AGENTS))} "
+              "or an importable module:Class", file=sys.stderr)
+        return 2
     agent_kwargs = list(args.ak)
     if args.memory is not None:
         try:
@@ -196,11 +202,13 @@ def cmd_run_tasks(args: argparse.Namespace) -> int:
     # The task agents run inside the task container. On tasks whose agent phase has no
     # network, Harbor turns these hosts into the only ones allowed; it ignores
     # them on tasks with internet.
-    hosts = api_hosts(args.model, [])
-    job_name = args.job_name or default_job_name(f"tasks-{args.task_agent}")
+    hosts = api_hosts(args.model, args.allow_host)
+    # A custom adapter names its job after its class: tasks-<class>-<time>.
+    label = args.task_agent if args.task_agent in TASK_AGENTS else args.task_agent.rpartition(":")[2].lower()
+    job_name = args.job_name or default_job_name(f"tasks-{label}")
     command = [
         "harbor", "run", *(["-p", str(args.tasks)] if args.tasks else ["-d", TASKS_DATASET]),
-        "-a", TASK_AGENTS[args.task_agent], "-m", args.model,
+        "-a", TASK_AGENTS.get(args.task_agent, args.task_agent), "-m", args.model,
         "-e", args.env, "-k", str(args.attempts), "--jobs-dir", str(args.jobs_dir), "--job-name", job_name, "-y",
         "--ve", f"GRADING_MODEL={GRADING_MODEL}",
         *[arg for host in hosts for arg in ("--allow-agent-host", host)],
@@ -267,7 +275,9 @@ def build_parser() -> argparse.ArgumentParser:
                                "Claude Managed Agents uses the shared memory-generation timeout; omit -e and other Harbor-only options."))
     p.add_argument("--corpus", type=Path, required=True)
     p.add_argument("--harness", dest="agent", required=True, metavar="HARNESS",
-                   help="memory-generation harness: claude-managed-agents, hermes, openai-sandbox-memory, a Harbor agent name, or module:Class")
+                   help="memory-generation harness: "
+                        f"{', '.join(sorted({*hosted.generators(), *MEMORY_AGENTS}))}, "
+                        "a Harbor agent name, or module:Class")
     p.add_argument("-m", "--model", required=True, help="memory model")
     p.add_argument("--allow-host", action="append", default=[],
                    help="model API host the memory agent may reach (default: from the model's provider)")
@@ -277,9 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("run-tasks", help="run a fixed task agent on the target tasks, with or without memory")
     p.add_argument("--tasks", type=Path, help=f"folder of target tasks (default: {TASKS_DATASET} from Harbor Hub)")
-    p.add_argument("--harness", dest="task_agent", choices=sorted(TASK_AGENTS), required=True,
-                   help="task-execution harness")
+    p.add_argument("--harness", dest="task_agent", required=True, metavar="HARNESS",
+                   help=f"task-execution harness: {', '.join(sorted(TASK_AGENTS))}, or module:Class")
     p.add_argument("-m", "--model", required=True, help="task model")
+    p.add_argument("--allow-host", action="append", default=[],
+                   help="API host the task agent may reach (default: from the model's provider)")
     p.add_argument("--memory", type=Path, help="memory folder or memory-generation job/trial folder; omit for no memory")
     p.add_argument("--effort", help="reasoning effort passed to the task agent")
     p.add_argument("-k", "--attempts", type=int, default=3)

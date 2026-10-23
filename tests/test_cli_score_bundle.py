@@ -3,12 +3,13 @@ import json
 import shlex
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 from unittest.mock import patch
 
 import pytest
 
-from frontier_memory import claude_dream
+from frontier_memory import claude_dream, hosted
 from frontier_memory.agents import DEFAULT_CLI_VERSIONS
 from frontier_memory.bundle import build_bundle
 from frontier_memory.cli import main, resolve_memory
@@ -165,6 +166,19 @@ def test_run_tasks_dry_run_allows_task_model_api_host_and_memory(tmp_path, capsy
     assert "frontier_memory.agents.codex:MemoryCodex" in err
 
 
+def test_run_tasks_accepts_a_custom_adapter_and_hosts(tmp_path, capsys):
+    code = main(["run-tasks", "--harness", "my_pkg.agents:MyTaskAgent", "-m", "anthropic/claude-opus-5-5",
+                 "--allow-host", "api.example.com", "--dry-run"])
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "-a my_pkg.agents:MyTaskAgent " in err
+    assert "--job-name tasks-mytaskagent-" in err
+    assert "--allow-agent-host api.example.com" in err
+    assert "api.anthropic.com" not in err
+    assert main(["run-tasks", "--harness", "no-such-agent", "-m", "openai/gpt-6-sol", "--dry-run"]) == 2
+    assert "unknown harness 'no-such-agent'" in capsys.readouterr().err
+
+
 def test_cma_id_precedence_and_missing_values(monkeypatch):
     for prefix in ("FRONTIER_MEMORY", "DREAMBENCH"):
         for name in ("AGENT_ID", "ENVIRONMENT_ID"):
@@ -285,3 +299,46 @@ def test_harness_selects_the_hermes_adapter_for_each_stage(tmp_path, capsys):
     assert main(["run-tasks", "--harness", "hermes", "-m", "anthropic/claude-opus-5-5",
                  "--dry-run"]) == 0
     assert "-a frontier_memory.agents.hermes:MemoryHermes" in capsys.readouterr().err
+
+
+def test_a_registered_hosted_generator_is_dispatched_resolved_and_bundled(tmp_path, monkeypatch, capsys):
+    calls = []
+    generator = hosted.HostedGenerator(
+        harness="example-hosted", backend="example-backend", runner="tests.example:run",
+        evidence_type="example-api-receipts", receipt_keys=("run_id",))
+    monkeypatch.setattr(hosted, "entry_points", lambda group: [SimpleNamespace(name="example", load=lambda: generator)])
+    monkeypatch.setattr(hosted.HostedGenerator, "run", lambda self, args: calls.append(args.agent) or 0)
+    make_corpus(tmp_path / "corpus")
+    assert main(["generate-memory", "--corpus", str(tmp_path / "corpus"), "--harness", "example-hosted",
+                 "-m", "example/model"]) == 0
+    assert calls == ["example-hosted"]
+
+    job = tmp_path / "jobs" / "memory-example"
+    (job / "memory").mkdir(parents=True)
+    (job / "memory" / "MEMORY.md").write_text("# hosted\n")
+    report = check_memory(job / "memory")
+    write_json(job / "meta.json", {"dream_backend": "example-backend", "ok": True, "run_id": "r-1",
+                                   "corpus": {"name": "corpus", "sha256": "abc"}})
+    assert resolve_memory(job) == (job / "memory").resolve()
+    make_task_job(tmp_path / "tasks", report["memory_sha256"], [1.0])
+    bundle = build_bundle(job, [tmp_path / "tasks"], tmp_path / "bundle.tar.gz")
+    assert bundle["dream"]["evidence_type"] == "example-api-receipts" and bundle["dream"]["run_id"] == "r-1"
+    assert len(bundle["problems"]) == 1 and "example-hosted ran outside Harbor" in bundle["problems"][0]
+
+    write_json(job / "meta.json", {"dream_backend": "example-backend", "ok": False})
+    with pytest.raises(ValueError, match="example-hosted job has no successfully exported memory"):
+        resolve_memory(job)
+
+
+def test_a_broken_hosted_generator_is_skipped_not_fatal(monkeypatch, capsys):
+    def broken():
+        raise ImportError("no module named example")
+
+    monkeypatch.setattr(hosted, "entry_points", lambda group: [
+        SimpleNamespace(name="broken", load=broken), SimpleNamespace(name="wrong", load=lambda: object())])
+    assert set(hosted.generators()) == {"claude-managed-agents"}
+    with pytest.raises(SystemExit) as stopped:
+        main(["generate-memory", "--help"])
+    assert stopped.value.code == 0
+    err = capsys.readouterr().err
+    assert "skipping hosted generator 'broken'" in err and "skipping hosted generator 'wrong'" in err
