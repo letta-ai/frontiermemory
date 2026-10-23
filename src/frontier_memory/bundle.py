@@ -13,14 +13,14 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from frontier_memory.claude_dream import native_dream_meta
+from frontier_memory.hosted import hosted_job
 from frontier_memory.memory import check_memory
 from frontier_memory.score import score_jobs, trial_dirs
 
 
 def dream_trial_dir(path: Path) -> Path:
-    """Accept a native CMA job, a Harbor trial, or a Harbor job with one trial."""
-    if native_dream_meta(path) is not None:
+    """Accept a hosted generator's job, a Harbor trial, or a Harbor job with one trial."""
+    if hosted_job(path) is not None:
         return path
     if (path / "artifacts" / "memory").is_dir():
         return path
@@ -31,11 +31,12 @@ def dream_trial_dir(path: Path) -> Path:
 
 
 def dream_summary(trial: Path) -> dict[str, Any]:
-    native = native_dream_meta(trial)
-    if native is not None:
+    job = hosted_job(trial)
+    if job is not None:
+        native, generator = job
         report = check_memory(trial / "memory")
         return {
-            "trial": trial.name, "memory_agent": native.get("memory_agent"),
+            "trial": trial.name, "memory_agent": native.get("memory_agent") or generator.harness,
             "memory_model": native.get("dreamer_model"), "memory_agent_kwargs": {},
             "allowed_hosts": None, "timeout_multiplier": None, "timeout_sec": native.get("timeout_sec"),
             "corpus_name": (native.get("corpus") or {}).get("name"),
@@ -43,10 +44,8 @@ def dream_summary(trial: Path) -> dict[str, Any]:
             "memory_ok": bool(native.get("ok") and report["ok"]),
             "memory_sha256": report.get("memory_sha256"), "memory_bytes": report.get("total_bytes"),
             "has_trajectory": False, "exception": native.get("error"),
-            "evidence_type": "anthropic-api-receipts", "dream_id": native.get("dream_id"),
-            "anchor_session_id": native.get("anchor_session_id"),
-            "input_memory_store_id": native.get("input_memory_store_id"),
-            "output_memory_store_id": native.get("output_memory_store_id"),
+            "evidence_type": generator.evidence_type,
+            **{key: native.get(key) for key in generator.receipt_keys},
         }
     result = json.loads((trial / "result.json").read_text())
     report_path = trial / "verifier" / "memory-report.json"
@@ -83,8 +82,9 @@ def build_bundle(dream: Path, task_jobs: list[Path], out: Path, note: str = "") 
     problems = []
     if not summary_dream["memory_ok"]:
         problems.append("the dream's memory failed the memory check")
-    if summary_dream.get("evidence_type") == "anthropic-api-receipts":
-        problems.append("CMA has native API receipts, not a full Harbor agent trace or Harbor-enforced network policy; "
+    if summary_dream.get("evidence_type"):
+        problems.append(f"{summary_dream['memory_agent']} ran outside Harbor and has {summary_dream['evidence_type']}, "
+                        "not a full Harbor agent trace or Harbor-enforced network policy; "
                         "submission compliance requires explicit review")
     elif not summary_dream["has_trajectory"]:
         problems.append("the dream trial has no agent/trajectory.json; include the memory agent's trace")

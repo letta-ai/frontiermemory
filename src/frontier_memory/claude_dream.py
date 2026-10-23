@@ -100,14 +100,6 @@ def dream_timeout_sec() -> float:
     return float(tomllib.loads(task.read_text())["agent"]["timeout_sec"])
 
 
-def native_dream_meta(path: Path) -> dict[str, Any] | None:
-    file = path / "meta.json"
-    if not file.is_file():
-        return None
-    meta = json.loads(file.read_text())
-    return meta if isinstance(meta, dict) and meta.get("dream_backend") == BACKEND else None
-
-
 def resolve_managed_ids(kwargs: list[str]) -> tuple[str, str]:
     """Apply the documented per-ID precedence; never guess or create provider IDs."""
     explicit = {}
