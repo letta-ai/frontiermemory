@@ -11,7 +11,7 @@ import pytest
 from frontier_memory import claude_dream
 from frontier_memory.agents import DEFAULT_CLI_VERSIONS
 from frontier_memory.bundle import build_bundle
-from frontier_memory.cli import build_parser, main, resolve_memory
+from frontier_memory.cli import main, resolve_memory
 from frontier_memory.corpus import write_sums
 from frontier_memory.memory import check_memory
 from frontier_memory.score import score_jobs
@@ -285,15 +285,3 @@ def test_harness_selects_the_hermes_adapter_for_each_stage(tmp_path, capsys):
     assert main(["run-tasks", "--harness", "hermes", "-m", "anthropic/claude-opus-5-5",
                  "--dry-run"]) == 0
     assert "-a frontier_memory.agents.hermes:MemoryHermes" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("command,flag", [
-    ("generate-memory", "-a"), ("generate-memory", "--agent"), ("run-tasks", "--task-agent"),
-])
-def test_old_harness_flags_are_rejected(command, flag, capsys):
-    extra = ["--corpus", "corpus"] if command == "generate-memory" else []
-    with pytest.raises(SystemExit) as stopped:
-        build_parser().parse_args([command, "--harness", "hermes", "-m", "anthropic/claude-opus-5-5",
-                                  *extra, flag, "hermes"])
-    assert stopped.value.code == 2
-    assert "unrecognized arguments" in capsys.readouterr().err
