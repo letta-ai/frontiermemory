@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import sys
 from dataclasses import dataclass
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -48,12 +49,21 @@ BUILT_IN = (
 
 
 def generators() -> dict[str, HostedGenerator]:
-    """Registered generators by harness name: built-ins, then installed entry points."""
+    """Registered generators by harness name: built-ins, then installed entry points.
+
+    An entry point that fails to load is skipped with a warning, so one broken package
+    does not stop every command.
+    """
     found = {g.harness: g for g in BUILT_IN}
     for point in entry_points(group=ENTRY_POINT_GROUP):
-        generator = point.load()
+        try:
+            generator = point.load()
+        except Exception as exc:  # noqa: BLE001 - any import error in a third-party package
+            print(f"warning: skipping hosted generator {point.name!r}: {exc}", file=sys.stderr)
+            continue
         if not isinstance(generator, HostedGenerator):
-            raise TypeError(f"entry point {point.name} is not a HostedGenerator")
+            print(f"warning: skipping hosted generator {point.name!r}: not a HostedGenerator", file=sys.stderr)
+            continue
         found.setdefault(generator.harness, generator)
     return found
 

@@ -328,3 +328,17 @@ def test_a_registered_hosted_generator_is_dispatched_resolved_and_bundled(tmp_pa
     write_json(job / "meta.json", {"dream_backend": "example-backend", "ok": False})
     with pytest.raises(ValueError, match="example-hosted job has no successfully exported memory"):
         resolve_memory(job)
+
+
+def test_a_broken_hosted_generator_is_skipped_not_fatal(monkeypatch, capsys):
+    def broken():
+        raise ImportError("no module named example")
+
+    monkeypatch.setattr(hosted, "entry_points", lambda group: [
+        SimpleNamespace(name="broken", load=broken), SimpleNamespace(name="wrong", load=lambda: object())])
+    assert set(hosted.generators()) == {"claude-managed-agents"}
+    with pytest.raises(SystemExit) as stopped:
+        main(["generate-memory", "--help"])
+    assert stopped.value.code == 0
+    err = capsys.readouterr().err
+    assert "skipping hosted generator 'broken'" in err and "skipping hosted generator 'wrong'" in err
