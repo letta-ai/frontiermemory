@@ -49,6 +49,22 @@ def test_public_brand_is_one_word(name: str) -> None:
     assert not re.search(r"\bfrontier memory\b", (ROOT / name).read_text(), re.IGNORECASE), name
 
 
+@pytest.mark.parametrize(
+    "name",
+    (
+        "README.md",
+        "docs/rules.md",
+        "docs/submitting-a-harness.md",
+        ".github/PULL_REQUEST_TEMPLATE/harness.md",
+    ),
+)
+def test_submission_copy_requires_three_candidate_runs_before_official_verification(name: str) -> None:
+    text = (ROOT / name).read_text()
+    assert "three independent" in text.lower(), name
+    assert "Letta independently verifies" in text, name
+    assert not re.search(r"Letta\s+runs\s+three\s+(?:independent\s+)?official", text), name
+
+
 def test_cli_help_uses_release_names(capsys: pytest.CaptureFixture[str]) -> None:
     parser = build_parser()
     for command in ("generate-memory", "build-memory-task", "run-tasks", "score", "bundle"):
