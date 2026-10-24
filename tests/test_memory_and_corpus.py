@@ -127,6 +127,35 @@ def test_release_task_toml_changes_only_name_and_canary():
         "schema_version": "1.1", "task": {"name": "letta-ai/y"}, "agent": {"timeout_sec": 1.0}}
 
 
+def test_corpus_export_removes_corpus_building_labels():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from export_corpus import unlabelled
+
+    labelled = {
+        "schema_version": "ATIF-v1.2", "session_id": "enterpriseops-csm-26d1b04a-sol-1",
+        "trajectory_id": "enterpriseops-csm-26d1b04a-sol-1",
+        "agent": {"name": "codex", "extra": {"cwd": "/app"}},
+        "notes": "Five SWE-Interact Harbor stage trajectories merged in stage order.",
+        "extra": {"preference_id": "changelog-policy", "profile_position": 8},
+        "steps": [{"step_id": 1, "source": "user", "message": "Add a changelog entry — café",
+                   "extra": {"swe_interact_stage": "01_plan", "controlled_customer_context": True}},
+                  {"step_id": 2, "source": "agent", "message": "ok", "extra": {"cwd": "/app"}}],
+        "final_metrics": {"total_steps": 2, "reward": 1, "swe_interact_stage_count": 5},
+    }
+    clean = unlabelled(json.dumps(labelled, indent=2, ensure_ascii=False) + "\n", "inputs/t0001.json")
+    assert json.loads(clean) == {
+        "schema_version": "ATIF-v1.2", "session_id": "t0001",
+        "agent": {"name": "codex", "extra": {"cwd": "/app"}},
+        "steps": [{"step_id": 1, "source": "user", "message": "Add a changelog entry — café"},
+                  {"step_id": 2, "source": "agent", "message": "ok", "extra": {"cwd": "/app"}}],
+        "final_metrics": {"total_steps": 2},
+    }
+    plain = {"schema_version": "ATIF-v1.2", "session_id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+             "notes": "Converted from mini-swe-agent trajectory format to ATIF", "steps": []}
+    assert unlabelled(json.dumps(plain), "inputs/t0002.json") is None
+    assert unlabelled('{"type": "session_meta", "extra": {"x": 1}}\n', "inputs/t0003.jsonl") is None
+
+
 def test_cma_upload_preserves_utf8_and_line_endings(tmp_path):
     source = write(tmp_path / "inputs/t0001.jsonl", "")
     source.write_bytes('historical café 🧪\r\nPASS\r\n'.encode())
