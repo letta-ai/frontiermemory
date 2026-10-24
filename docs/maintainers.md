@@ -6,14 +6,19 @@ for maintainers.
 ## Corpus
 
 ```bash
-python scripts/export_corpus.py <private dream inputs>/joint-674-2026-10-17 data/corpus/joint-674 --redact
+python scripts/export_corpus.py <private prepared corpus> data/corpus/joint-674 --redact
 ```
 
-- The export copies the `native/` view, verbatim, to `inputs/`.
+- The export copies the `native/` view to `inputs/`.
+- It removes the labels added while the corpus was built (`strip_labels` in the
+  script): the SWE-Interact preference, stage and curation fields,
+  `trajectory_id`, and trial names in `session_id`. Every other file is copied
+  verbatim.
 - It leaves out `input-manifest.json`, which maps each opaque name to its task.
 - It writes `SHA256SUMS`. The corpus digest is the SHA-256 of that file.
 - If any file holds something that looks like a credential, the export fails.
   `--redact` replaces each match with `[REDACTED]` instead.
+- If two exported files are identical, the export fails.
 
 `RELEASE_SHA256` in `src/frontier_memory/corpus.py` pins the digest that
 `fetch-corpus` accepts. Upload the corpus and its card:

@@ -4,7 +4,7 @@ Layout::
 
     <corpus>/
       SHA256SUMS        # "<sha256>  <relative path>" for every file below
-      inputs/t0001.jsonl ...   # each trajectory verbatim, as its harness wrote it
+      inputs/t0001.jsonl ...   # each trajectory as its harness wrote it, minus corpus-building labels
 
 The corpus digest is the SHA-256 of SHA256SUMS. Results record it, so every
 score points back to the exact corpus its dream read.
@@ -19,7 +19,7 @@ INPUTS_DIR = "inputs"
 SUMS_FILE = "SHA256SUMS"
 # The released corpus: a gated Hugging Face dataset, pinned by its digest.
 RELEASE_REPO = "letta-ai/frontier-memory-corpus"
-RELEASE_SHA256 = "c7d31214ed20af4f14f46c4b9a838ebc9aa35a9491dfbce0fa50f7aa456eedd1"
+RELEASE_SHA256 = "7ac51c2a75b5b39ba6e318e7d1b501176ac950e4e9459e7d0f4c1e2b2d0674b9"
 
 
 def file_sha256(path: Path) -> str:
