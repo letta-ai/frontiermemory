@@ -18,7 +18,10 @@ from pathlib import Path
 INPUTS_DIR = "inputs"
 SUMS_FILE = "SHA256SUMS"
 # The released corpus: a gated Hugging Face dataset, pinned by its digest.
+# RELEASE_REVISION is the dataset tag whose SHA256SUMS hashes to RELEASE_SHA256.
+# Bump the two together: the dataset's main branch can move past the release.
 RELEASE_REPO = "letta-ai/frontier-memory-corpus"
+RELEASE_REVISION = "v1.0"
 RELEASE_SHA256 = "c7d31214ed20af4f14f46c4b9a838ebc9aa35a9491dfbce0fa50f7aa456eedd1"
 
 
@@ -69,7 +72,7 @@ def verify_corpus(root: Path) -> str:
     return corpus_digest(root)
 
 
-def fetch_corpus(out: Path, repo: str = RELEASE_REPO, revision: str | None = None,
+def fetch_corpus(out: Path, repo: str = RELEASE_REPO, revision: str | None = RELEASE_REVISION,
                  expected: str = RELEASE_SHA256) -> str:
     """Download the corpus from Hugging Face into ``out`` and check it; return the digest.
 

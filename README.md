@@ -46,6 +46,7 @@ This installs Harbor 0.24.0 and the `frontier-memory` command.
 - **Corpus:** the gated Hugging Face dataset
   [`letta-ai/frontier-memory-corpus`](https://huggingface.co/datasets/letta-ai/frontier-memory-corpus).
   Accept its terms, log in with `hf auth login`, then fetch it. `fetch-corpus`
+  downloads the release tag (`v1.0`, not `main`; override with `--revision`) and
   checks every file and the corpus digest.
 
   ```bash
