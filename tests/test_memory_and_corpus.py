@@ -102,15 +102,30 @@ def test_dream_task_loads_in_harbor(tmp_path):
 def test_fetch_corpus_checks_release_digest(tmp_path, monkeypatch):
     import huggingface_hub
 
-    from frontier_memory.corpus import fetch_corpus
+    from frontier_memory.corpus import RELEASE_REVISION, fetch_corpus
 
     source = tmp_path / "hf"
     digest = make_corpus(source)
-    monkeypatch.setattr(huggingface_hub, "snapshot_download",
-                        lambda *a, local_dir, **k: shutil.copytree(source, local_dir, dirs_exist_ok=True))
+    revisions = []
+
+    def fake_snapshot_download(*a, local_dir, revision, **k):
+        revisions.append(revision)
+        shutil.copytree(source, local_dir, dirs_exist_ok=True)
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
     assert fetch_corpus(tmp_path / "out", expected=digest) == digest
+    assert revisions == [RELEASE_REVISION]
     with pytest.raises(ValueError, match="not the release digest"):
         fetch_corpus(tmp_path / "out2", expected="0" * 64)
+
+
+def test_fetch_corpus_cli_defaults_to_release_revision():
+    from frontier_memory.cli import build_parser
+    from frontier_memory.corpus import RELEASE_REVISION
+
+    parser = build_parser()
+    assert parser.parse_args(["fetch-corpus", "--out", "x"]).revision == RELEASE_REVISION
+    assert parser.parse_args(["fetch-corpus", "--out", "x", "--revision", "main"]).revision == "main"
 
 
 def test_release_task_toml_changes_only_name_and_canary():

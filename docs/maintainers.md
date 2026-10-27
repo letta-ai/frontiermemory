@@ -16,7 +16,8 @@ python scripts/export_corpus.py <private dream inputs>/joint-674-2026-10-17 data
   `--redact` replaces each match with `[REDACTED]` instead.
 
 `RELEASE_SHA256` in `src/frontier_memory/corpus.py` pins the digest that
-`fetch-corpus` accepts. Upload the corpus and its card:
+`fetch-corpus` accepts, and `RELEASE_REVISION` names the dataset tag it
+downloads by default. Bump them together, and tag the dataset revision. Upload the corpus and its card:
 
 ```python
 from huggingface_hub import HfApi
