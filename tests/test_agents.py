@@ -7,7 +7,7 @@ from harbor.models.trajectories import Trajectory
 
 from frontier_memory.agents import DEFAULT_CLI_VERSIONS
 from frontier_memory.agents.claude_code import MemoryClaudeCode
-from frontier_memory.agents.codex import MemoryCodex, codex_events_atif
+from frontier_memory.agents.codex import MemoryCodex, codex_event_usage, codex_events_atif
 
 
 @pytest.mark.parametrize("agent,model", [
@@ -38,6 +38,20 @@ def test_codex_events_atif_keeps_web_search_and_answer_last():
     assert steps[0]["message"] == "do it"
     assert steps[-1]["message"] == "final answer"
     assert any(call["function_name"] == "web_search" for s in steps for call in s.get("tool_calls", []))
+
+
+def test_codex_parsers_skip_stderr_lines_that_parse_as_json(tmp_path):
+    # Harbor tees Codex's stderr into the event file; a line like `"cookie"` is valid JSON.
+    events = [
+        json.dumps({"type": "item.completed", "item": {"id": "1", "type": "agent_message", "text": "done"}}),
+        '        "cookie"',
+        "42",
+        json.dumps({"type": "turn.completed", "usage": {"input_tokens": 3, "output_tokens": 1}}),
+    ]
+    events_file = tmp_path / "codex.txt"
+    events_file.write_text("\n".join(events))
+    assert codex_event_usage(events_file) == {"input_tokens": 3, "output_tokens": 1}
+    assert codex_events_atif("do it", events_file.read_text(), "gpt-6-sol")["steps"][-1]["message"] == "done"
 
 
 @pytest.mark.parametrize("exit_code", [0, 2])

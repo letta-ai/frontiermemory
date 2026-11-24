@@ -9,7 +9,7 @@ The export fails if any file holds something that looks like a credential.
 ``--redact`` replaces each match with ``[REDACTED]`` instead and lists the files
 it changed. Redaction changes the corpus digest.
 
-    python scripts/export_corpus.py <private dream inputs>/joint-674-2026-10-17 data/corpus/joint-674
+    python scripts/export_corpus.py path/to/source-trajectories data/corpus/frontier-memory
 """
 
 from __future__ import annotations

@@ -119,6 +119,22 @@ def test_fetch_corpus_checks_release_digest(tmp_path, monkeypatch):
         fetch_corpus(tmp_path / "out2", expected="0" * 64)
 
 
+def test_fetch_corpus_checks_each_release_tag_against_its_own_digest(tmp_path, monkeypatch):
+    import huggingface_hub
+
+    from frontier_memory import corpus
+
+    source = tmp_path / "hf"
+    digest = make_corpus(source)
+    monkeypatch.setattr(huggingface_hub, "snapshot_download",
+                        lambda *a, local_dir, **k: shutil.copytree(source, local_dir, dirs_exist_ok=True))
+    monkeypatch.setitem(corpus.RELEASE_DIGESTS, "v0.9", digest)
+    assert corpus.fetch_corpus(tmp_path / "old", revision="v0.9") == digest
+    with pytest.raises(ValueError, match="not the release digest"):
+        corpus.fetch_corpus(tmp_path / "current", revision=corpus.RELEASE_REVISION)
+    assert corpus.RELEASE_SHA256 == corpus.RELEASE_DIGESTS[corpus.RELEASE_REVISION]
+
+
 def test_fetch_corpus_cli_defaults_to_release_revision():
     from frontier_memory.cli import build_parser
     from frontier_memory.corpus import RELEASE_REVISION

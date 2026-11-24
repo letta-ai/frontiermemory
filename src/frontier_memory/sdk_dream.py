@@ -112,9 +112,15 @@ class Evidence:
 
 async def generate_memory(*, inputs: Path, workspace: Path, instruction: str, model: str,
                           evidence: Evidence, concurrency: int = PHASE_ONE_CONCURRENCY,
-                          token_limit: int | None = None, effort: str | None = None) -> None:
-    """Use the pinned SDK's native phases and tools on the existing container."""
+                          token_limit: int | None = None, effort: str | None = None) -> list[str]:
+    """Use the pinned SDK's native phases and tools on the existing container.
+
+    Returns the errors the SDK logged. A phase-one rollout that fails leaves no raw
+    memory but does not stop consolidation, so those errors do not fail the run; a run
+    whose phase two did not finish does.
+    """
     from agents import ModelSettings, set_trace_processors
+    from agents.logger import log_model_and_tool_action_error
     from agents.sandbox import Manifest
     from agents.sandbox.capabilities import Memory
     from agents.sandbox.config import MemoryGenerateConfig
@@ -197,6 +203,9 @@ async def generate_memory(*, inputs: Path, workspace: Path, instruction: str, mo
                             self._queue.put_nowait(item)
                             return
                         await self._process_rollout_file(str(item))
+                    except Exception as exc:
+                        # As the SDK's own worker does: log the failed rollout and go on.
+                        log_model_and_tool_action_error(sdk_manager.logger, "Sandbox memory worker failed", exc)
                     finally:
                         self._queue.task_done()
             tasks = [asyncio.create_task(drain()) for _ in range(concurrency)]
@@ -237,16 +246,16 @@ async def generate_memory(*, inputs: Path, workspace: Path, instruction: str, mo
             for key, payload in rollouts.items():
                 await manager.enqueue_rollout_payload(payload, rollout_id=key)
             await manager.flush()
-            if errors:
-                raise RuntimeError("SDK memory generation failed: " + "; ".join(errors))
             selection = workspace / "memories" / "phase_two_selection.json"
             if not selection.is_file():
-                raise RuntimeError("SDK did not complete phase-two consolidation")
+                raise RuntimeError("SDK did not complete phase-two consolidation"
+                                   + (": " + "; ".join(errors) if errors else ""))
     finally:
         await sandbox_client.delete(session)
         await client.close()
         for logger in loggers:
             logger.removeHandler(handler)
+    return errors
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -270,11 +279,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         instruction = args.instruction.read_text()
         (args.logs / "sdk-instruction.md").write_text(instruction)
-        asyncio.run(generate_memory(inputs=args.inputs, workspace=args.logs / "sdk-workspace",
+        workspace = args.logs / "sdk-workspace"
+        errors = asyncio.run(generate_memory(inputs=args.inputs, workspace=workspace,
             instruction=instruction, model=args.model, evidence=evidence,
             concurrency=args.phase_one_concurrency, token_limit=args.phase_one_token_limit,
             effort=args.reasoning_effort))
-        meta["memory_files"] = export_memory(args.logs / "sdk-workspace" / "memories", args.output)
+        meta["memory_files"] = export_memory(workspace / "memories", args.output)
+        # The consolidated memory stands; record what phase one lost on the way.
+        raw = {path.stem for path in (workspace / "memories" / "raw_memories").glob("*.md")}
+        meta["logged_errors"] = errors
+        meta["sources_without_phase_one_memory"] = sorted(
+            path.stem for path in args.inputs.iterdir() if path.stem not in raw)
         meta["ok"] = True
     except Exception as exc:
         meta["error"] = f"{type(exc).__name__}: {exc}"
