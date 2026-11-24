@@ -18,11 +18,17 @@ from pathlib import Path
 INPUTS_DIR = "inputs"
 SUMS_FILE = "SHA256SUMS"
 # The released corpus: a gated Hugging Face dataset, pinned by its digest.
-# RELEASE_REVISION is the dataset tag whose SHA256SUMS hashes to RELEASE_SHA256.
-# Bump the two together: the dataset's main branch can move past the release.
+# RELEASE_DIGESTS maps each release tag to the SHA-256 of its SHA256SUMS; RELEASE_REVISION
+# is the current release. On a release, add its tag and bump RELEASE_REVISION: the
+# dataset's main branch can move past the release.
 RELEASE_REPO = "letta-ai/frontier-memory-corpus"
-RELEASE_REVISION = "v1.0"
-RELEASE_SHA256 = "c7d31214ed20af4f14f46c4b9a838ebc9aa35a9491dfbce0fa50f7aa456eedd1"
+RELEASE_DIGESTS = {
+    "v1.0": "c7d31214ed20af4f14f46c4b9a838ebc9aa35a9491dfbce0fa50f7aa456eedd1",
+    "v1.1": "19346a3e46b022ed1def552f8e4f4c50030cefd3250a7a8e10676b46b370b763",
+    "v1.2": "a30747e18f9b1c2c6306cabadbf304fe2f1f3e9bb0379138e0e2f72bb1ed3fe4",
+}
+RELEASE_REVISION = "v1.2"
+RELEASE_SHA256 = RELEASE_DIGESTS[RELEASE_REVISION]
 
 
 def file_sha256(path: Path) -> str:
@@ -73,17 +79,19 @@ def verify_corpus(root: Path) -> str:
 
 
 def fetch_corpus(out: Path, repo: str = RELEASE_REPO, revision: str | None = RELEASE_REVISION,
-                 expected: str = RELEASE_SHA256) -> str:
+                 expected: str | None = None) -> str:
     """Download the corpus from Hugging Face into ``out`` and check it; return the digest.
 
-    The dataset is gated: accept its terms on Hugging Face, then log in
-    (``hf auth login``) or set ``HF_TOKEN``.
+    ``expected`` defaults to the pinned digest of ``revision`` if it is a release tag,
+    else the current release's. The dataset is gated: accept its terms on Hugging Face,
+    then log in (``hf auth login``) or set ``HF_TOKEN``.
     """
+    expected = expected or RELEASE_DIGESTS.get(revision or "", RELEASE_SHA256)
     from huggingface_hub import snapshot_download
 
     snapshot_download(repo, repo_type="dataset", revision=revision, local_dir=out,
                       allow_patterns=[f"{INPUTS_DIR}/*", SUMS_FILE])
     digest = verify_corpus(out)
     if digest != expected:
-        raise ValueError(f"corpus digest {digest} is not the release digest {expected}")
+        raise ValueError(f"corpus digest {digest} is not the release digest {expected} ({revision})")
     return digest

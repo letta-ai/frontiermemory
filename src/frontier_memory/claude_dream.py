@@ -23,7 +23,7 @@ are treated as unset. Missing IDs fail before any API call. --dry-run still
 requires valid IDs and a checksummed corpus but does not require the API key.
 
 Example (IDs must be supplied by the operator, not these placeholders):
-    frontier-memory generate-memory --corpus data/corpus/joint-674 \\
+    frontier-memory generate-memory --corpus data/corpus/frontier-memory \\
         -a claude-managed-agents -m anthropic/claude-opus-5-5 \\
         --ak agent_id=agent_... --ak environment_id=env_...
 
@@ -92,6 +92,29 @@ ANCHOR_MESSAGE = (
     "input memory store. Do not solve any task or synthesize memory here; "
     "reply only ACK."
 )
+
+
+def scoped_dream_instruction(source_count: int) -> str:
+    """Retain the successful v1.0 run's explicit evidence scope and completion rule."""
+    return CLAUDE_DREAM_INSTRUCTION + f"""
+
+Required scope and completion rule for this run:
+- The single input session is an ACK-only anchor. It contains no task evidence;
+  do not treat it as the full source corpus or stop after reading it.
+- ALL {source_count} historical trajectories in this input memory store are in scope,
+  under /evidence/inputs/. Read /evidence/manifest.json (or every ordered part
+  under /evidence/manifest.parts/) to locate each trajectory. Files split under
+  a .parts directory are ordered chunks of one trajectory, not separate sources.
+- Do not ask which subset to distill; the answer is the entire corpus. If one
+  analyzer cannot cover it, assign non-overlapping task groups or file ranges
+  to workers and give each worker an explicit evidence path and deliverable.
+  You coordinate their findings. If a worker asks for scope, give it a scope
+  and continue instead of ending memory generation. Assign disjoint output paths if
+  multiple workers write memory; otherwise collect their findings yourself.
+- Synthesize reusable lessons, not task answers. Write /memory/MEMORY.md as
+  a root index plus at least one substantive document under /memory/. Verify
+  those files exist before ending. An empty /memory directory is a failure,
+  not a completed run."""
 
 
 def dream_timeout_sec() -> float:
@@ -360,8 +383,10 @@ def run_claude_managed_dream_backend(*, corpus: Path, model: str, agent_id: str,
     if budget <= 0 or poll_interval_sec <= 0:
         raise ValueError("timeout and polling interval must be positive")
     digest = verify_corpus(corpus)
-    if not corpus_files(corpus):
+    sources = corpus_files(corpus)
+    if not sources:
         raise ValueError("the corpus has no trajectories")
+    instructions = scoped_dream_instruction(len(sources))
     dest.mkdir(parents=True, exist_ok=False)
     start = clock()
     deadline = start + budget
@@ -386,7 +411,7 @@ def run_claude_managed_dream_backend(*, corpus: Path, model: str, agent_id: str,
 
     try:
         client = client or ClaudeDreamClient(deadline=deadline, clock=clock)
-        log_event("instructions", {"dream": CLAUDE_DREAM_INSTRUCTION, "anchor": ANCHOR_MESSAGE})
+        log_event("instructions", {"dream": instructions, "anchor": ANCHOR_MESSAGE})
         store = client.create_memory_store(name=f"frontier-memory-{dest.name}",
                                            metadata={"benchmark": "frontier-memory", "run": dest.name[:512]})
         meta["input_memory_store_id"] = store["id"]
@@ -410,7 +435,7 @@ def run_claude_managed_dream_backend(*, corpus: Path, model: str, agent_id: str,
         remaining()
         meta["remote_may_be_running"] = True
         dream = client.create_dream(store_id=str(store["id"]), session_id=str(session["id"]),
-            model=api_model, instructions=CLAUDE_DREAM_INSTRUCTION)
+            model=api_model, instructions=instructions)
         meta["dream_id"] = dream["id"]
         log_event("dream_created", dream)
         dream = _wait(dream, retrieve=client.retrieve_dream, terminal=TERMINAL_DREAM_STATUSES,

@@ -49,6 +49,8 @@ def codex_event_usage(events_path: Path) -> dict[str, int] | None:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue  # Harbor tees Codex's stderr into the same file.
+        if not isinstance(event, dict):
+            continue  # a stderr line can parse as a bare JSON string or number
         if event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
             usage = event["usage"]
     return usage
@@ -65,6 +67,8 @@ def codex_events_atif(instruction: str, events_text: str, model: str | None) -> 
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
             continue
         item = event.get("item") or {}
         if event.get("type") != "item.completed":

@@ -157,7 +157,7 @@ def test_run_tasks_dry_run_allows_task_model_api_host_and_memory(tmp_path, capsy
                  *attempt_args, "--dry-run"])
     assert code == 0
     err = capsys.readouterr().err
-    assert "-d letta-ai/frontier-memory@v1.0" in err
+    assert "-d letta-ai/frontier-memory@v1.2" in err
     assert f"-k {expected_attempts} " in err
     assert "--job-name tasks-codex-" in err
     assert "--allow-agent-host api.openai.com" in err
@@ -218,7 +218,7 @@ def test_cma_dry_run_and_harbor_option_rejection(tmp_path, monkeypatch, capsys, 
         assert plan["timeout_sec"] == claude_dream.dream_timeout_sec()
 
 
-def _cma_transport(status, cancel_error):
+def _cma_transport(status, cancel_error, source_count=1):
     def respond(request, timeout):
         path, method = urlsplit(request.full_url).path, request.method
         if path == "/v1/memory_stores":
@@ -230,9 +230,16 @@ def _cma_transport(status, cancel_error):
         elif path == "/v1/sessions/anchor":
             result = {"id": "anchor", "status": "idle"}
         elif path == "/v1/dreams":
-            assert json.loads(request.data)["inputs"] == [
+            payload = json.loads(request.data)
+            assert payload["inputs"] == [
                 {"type": "memory_store", "memory_store_id": "input"},
                 {"type": "sessions", "session_ids": ["anchor"]}]
+            # Regression: the unscoped port let analyzers stop at the ACK anchor
+            # instead of consolidating the evidence. Check the actual API body.
+            assert f"ALL {source_count} historical trajectories" in payload["instructions"]
+            assert "ACK-only anchor" in payload["instructions"]
+            assert "/evidence/inputs/" in payload["instructions"]
+            assert "Write /memory/MEMORY.md" in payload["instructions"]
             result = {"id": "dream", "status": "pending"}
         elif path == "/v1/dreams/dream":
             result = {"id": "dream", "status": status, "usage": {"output_tokens": 17},
@@ -252,8 +259,13 @@ def _cma_transport(status, cancel_error):
 
 @pytest.mark.parametrize("status,cancel_error", [("completed", False), ("failed", False),
                                                 ("running", False), ("running", True)])
-def test_cma_native_flow_export_and_timeout(tmp_path, monkeypatch, status, cancel_error):
+@pytest.mark.parametrize("source_count", [1, 2])
+def test_cma_native_flow_export_and_timeout(tmp_path, monkeypatch, status, cancel_error, source_count):
     make_corpus(tmp_path / "corpus")
+    if source_count == 2:
+        from frontier_memory.corpus import write_sums
+        (tmp_path / "corpus" / "inputs" / "t0002.json").write_text('{"steps": []}')
+        write_sums(tmp_path / "corpus")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "offline-fixture")
     elapsed = [0.0]
 
@@ -261,7 +273,7 @@ def test_cma_native_flow_export_and_timeout(tmp_path, monkeypatch, status, cance
         elapsed[0] += seconds
 
     dest = tmp_path / "native"
-    with patch("urllib.request.urlopen", side_effect=_cma_transport(status, cancel_error)):
+    with patch("urllib.request.urlopen", side_effect=_cma_transport(status, cancel_error, source_count)):
         meta = claude_dream.run_claude_managed_dream_backend(
             corpus=tmp_path / "corpus", model="anthropic/claude-test", agent_id="a", environment_id="e",
             dest=dest, timeout_sec=5, clock=lambda: elapsed[0], sleep=sleep, poll_interval_sec=1)
